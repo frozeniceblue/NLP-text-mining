@@ -1,0 +1,147 @@
+---
+title: "Project_Capstone_Milestone"
+author: "Zhengmao Zhu"
+date: "September 8, 2018"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Introduction
+The goal of this project is just to display that you've gotten used to working with the data and that you are on track to create your prediction algorithm. Please submit a report on R Pubs (http://rpubs.com/) that explains your exploratory analysis and your goals for the eventual app and algorithm. This document should be concise and explain only the major features of the data you have identified and briefly summarize your plans for creating the prediction algorithm and Shiny app in a way that would be understandable to a non-data scientist manager. You should make use of tables and plots to illustrate important summaries of the data set. The motivation for this project is to: 1. Demonstrate that you've downloaded the data and have successfully loaded it in.2. Create a basic report of summary statistics about the data sets.3. Report any interesting findings that you amassed so far.4. Get feedback on your plans for creating a prediction algorithm and Shiny app.
+
+## Load the data
+We have texts of blogs, twitter and news of Us, load them first for the further analysis.
+```{r, comment="",warning=FALSE}
+library(NLP)
+library(tm)
+library(wordcloud)
+library(RWeka)
+library(SnowballC)
+library(ggplot2)
+library(rtweet)
+
+US_blogs=readLines("C:\\Users\\frozenl\\Desktop\\coursera\\project_capstone\\Coursera_SwiftKey\\en_US\\en_US.blogs.txt", encoding = "UTF-8")
+US_twitter=readLines("C:\\Users\\frozenl\\Desktop\\coursera\\project_capstone\\Coursera_SwiftKey\\en_US\\en_US.twitter.txt", encoding = "UTF-8")
+US_news=readLines("C:\\Users\\frozenl\\Desktop\\coursera\\project_capstone\\Coursera_SwiftKey\\en_US\\en_US.news.txt", encoding = "UTF-8")
+```
+
+## Preprocess the data
+We preprocses texts above to get the attributes of them, include the sizes,lengths, characters and words for the data cleaning. 
+```{r, comment=""}
+blogs_length=length(US_blogs)
+twitter_length=length(US_twitter)
+news_length=length(US_news)
+
+blogs_size=file.info("C:\\Users\\frozenl\\Desktop\\coursera\\project_capstone\\Coursera_SwiftKey\\en_US\\en_US.blogs.txt")$size/1024^2
+twitter_size=file.info("C:\\Users\\frozenl\\Desktop\\coursera\\project_capstone\\Coursera_SwiftKey\\en_US\\en_US.twitter.txt")$size/1024^2
+news_size=file.info("C:\\Users\\frozenl\\Desktop\\coursera\\project_capstone\\Coursera_SwiftKey\\en_US\\en_US.news.txt")$size/1024^2
+
+blogs_nchar=sum(nchar(US_blogs))
+twitter_nchar=sum(nchar(US_twitter))
+news_nchar=sum(nchar(US_news))
+
+blogs_words=sum(sapply(strsplit(US_blogs, "\\s+"), length))
+twitter_words=sum(sapply(strsplit(US_twitter, "\\s+"), length))
+news_words=sum(sapply(strsplit(US_news, "\\s+"), length))
+
+text_summary=data.frame(name=c("blogs","twitter","news"),
+                        length=c(blogs_length,twitter_length,news_length),
+                        size.MB=c(blogs_size,twitter_size,news_size),
+                        character=c(blogs_nchar,twitter_nchar,news_nchar),
+                        words=c(blogs_words,twitter_words,news_words))
+text_summary
+```
+
+## Data cleaning
+Considering the size of texts and the memory of my laptop, we only choose parts of them to analyze and save operation time for more exploration.
+```{r, comment=""}
+set.seed(7777)
+sample_blogs=sample(US_blogs, 6000, replace=FALSE)
+sample_twitter=sample(US_twitter, 6000, replace=FALSE)
+sample_news=sample(US_news, 6000, replace=FALSE)
+rm(US_blogs)
+rm(US_twitter)
+rm(US_news)
+```
+
+## Build the corpus
+We build the corpus to extract the stem document and delete some conjunctions for analyzing the words frequency and relationship. 
+```{r, comment=""}
+corpus=function(sample){
+    sample1=VCorpus(VectorSource(sample))
+    sample2=tm_map(sample1, removeNumbers)
+    sample3=tm_map(sample2, removePunctuation)
+    sample4=tm_map(sample3, removeWords, stopwords("english"))
+    sample5=tm_map(sample4, stripWhitespace)
+    sample6=tm_map(sample5, stemDocument)
+    sample7=tm_map(sample6, content_transformer(tolower))
+    return(sample7)
+}
+
+sample_twitter=iconv(sample_twitter, "UTF-8", "ASCII")
+blogs=corpus(clean_tweets(sample_blogs))
+twitter=corpus(clean_tweets(sample_twitter))
+news=corpus(clean_tweets(sample_news))
+```
+
+## Summary the corpus
+We conclude the words frequency and plot the wordcloud of high frequency words for display.
+```{r, comment=""}
+distribution=function(text){
+    tdm=TermDocumentMatrix(text)
+    count=rowSums(as.matrix(tdm))
+    print(head(sort(count, decreasing = T)))
+    print(head(table(count), 10))
+    wordcloud(text, max.words = 100, random.order = FALSE,rot.per=0.37, 
+              use.r.layout=FALSE,colors=brewer.pal(8, "Set1"))
+    
+}
+
+distribution(blogs)
+distribution(twitter)
+distribution(news)
+```
+
+## Build n_gram models and show the plots
+We use the histogram to analyze the words relationship and the frequency of phrase. Considering we want to explore the relationship of phrase, so in the 2-gram and 3-gram models, we cannot remove the conjunction.
+```{r, comment=""}
+n_gram=function(n,sample_deal){
+    m=function(x) NGramTokenizer(x, Weka_control(min=n, max=n))
+    m_table=TermDocumentMatrix(sample_deal, control=list(tokenize=m))
+    m_corpus=findFreqTerms(m_table)
+    m_corpus_num=rowSums(as.matrix(m_table[m_corpus,]))
+    m_corpus_table=data.frame(words=names(m_corpus_num),frequency=m_corpus_num)
+    m_corpus_sort=m_corpus_table[order(-m_corpus_table$frequency),]
+    result=m_corpus_sort[1:10,]
+    print(result)
+    n_g=ggplot(result,aes(x=reorder(words,-frequency),y=frequency,fill=factor(reorder(words,-frequency))))
+    n_g=n_g+geom_bar(stat="identity")
+    n_g=n_g+labs(title="n-gram",x="Words",y="Frequency",fill="Frequency")
+    n_g=n_g+theme(axis.text.x=element_text(angle=90))
+    return(n_g)
+}
+
+bi_blogs=corpus(sample(sample_blogs, 2000, replace=FALSE))
+bi_twitter=corpus(sample(sample_twitter, 2000, replace=FALSE))
+bi_news=corpus(sample(sample_news, 2000, replace=FALSE))
+
+tri_blogs=corpus(sample(sample_blogs, 2000, replace=FALSE))
+tri_twitter=corpus(sample(sample_twitter, 2000, replace=FALSE))
+tri_news=corpus(sample(sample_news, 2000, replace=FALSE))
+
+n_gram(1,blogs)
+n_gram(2,bi_blogs)
+n_gram(3,tri_blogs)
+n_gram(1,twitter)
+n_gram(2,bi_twitter)
+n_gram(3,tri_twitter)
+n_gram(1,news)
+n_gram(2,bi_news)
+n_gram(3,tri_news)
+```
+
+## Next plan
+We hope to continue remove the words meaningless and build prediction algorithm (including n-gram modeland other models) with limited parts of texts and Shiny app. Finally, based on our algorithm, we input the text in our Shiny app, then we can predict the text we want. 
